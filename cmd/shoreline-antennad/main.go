@@ -101,7 +101,6 @@ func main() {
 	}
 
 	var mx sync.Mutex
-	var enable bool
 	var pOnline bool
 	type pontoonLocation struct {
 		Lat, Lon float64
