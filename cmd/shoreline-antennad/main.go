@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -29,6 +31,7 @@ func main() {
 	id := flag.String("c", "shoreline-antennad-"+uuid.NewV4().String(), "Client ID.")
 	httpAddr := flag.String("http", ":8000", "HTTP server listen address.")
 	uiOnly := flag.Bool("ui", false, "Start in UI-only mode (disable I2C bus).")
+	logFile := flag.String("log", "", "Log valid locations to file.")
 	flag.Parse()
 
 	u, err := url.Parse(*connStr)
@@ -50,6 +53,29 @@ func main() {
 		if err != nil {
 			log.Fatal("ERROR: mdns lookup: ", err)
 		}
+	}
+
+	var enc *json.Encoder
+	if *logFile != "" {
+		fd, err := os.OpenFile(*logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND|os.O_SYNC, 0644)
+		if err != nil {
+			log.Fatal("failed to open log file: ", err)
+		}
+		defer fd.Close()
+
+		enc = json.NewEncoder(fd)
+		var start struct {
+			Time  time.Time
+			Event string
+		}
+		start.Time = time.Now()
+		start.Event = "START"
+		err = enc.Encode(start)
+		if err != nil {
+			log.Fatal("failed to log start event: ", err)
+		}
+	} else {
+		enc = json.NewEncoder(ioutil.Discard)
 	}
 
 	opts := mqtt.NewClientOptions()
@@ -111,8 +137,9 @@ func main() {
 	var mx sync.Mutex
 	var pOnline bool
 	type pontoonLocation struct {
-		Lat, Lon float64
-		Time     time.Time
+		Lat, Lon       float64
+		LatErr, LonErr float64
+		Time           time.Time
 	}
 	var pLoc pontoonLocation
 	const earthRadiusCM = 6371 * 1000 * 100
@@ -217,6 +244,10 @@ func main() {
 
 		orientAntenna()
 		log.Println("Location updated.")
+		err = enc.Encode(newPLoc)
+		if err != nil {
+			log.Println("log location event:", err)
+		}
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -275,7 +306,7 @@ func main() {
 		}
 
 		mx.Lock()
-		err = cli.Publish(path.Join(topic, "config"), 0, true, data)
+		err = cli.Publish(path.Join(topic, "config"), 2, true, data)
 		if errRedir(err) {
 			return
 		}
