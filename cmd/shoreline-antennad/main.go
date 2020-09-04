@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"math"
+	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,8 @@ func main() {
 	connStr := flag.String("s", "tcp://homeassistant.local:1883/shorelinepi", "Connection url, leave host blank to use service discovery.")
 	pontoonTopicRoot := flag.String("p", "pontoonpi", "Root name of the pontoon topic.")
 	id := flag.String("c", "shoreline-antennad-"+uuid.NewV4().String(), "Client ID.")
+	httpAddr := flag.String("http", ":8000", "HTTP server listen address.")
+	uiOnly := flag.Bool("ui", false, "Start in UI-only mode (disable I2C bus).")
 	flag.Parse()
 
 	u, err := url.Parse(*connStr)
@@ -35,6 +38,7 @@ func main() {
 	topic := strings.TrimPrefix(u.Path, "/")
 	u.Path = ""
 
+	log.Println("Looking up host...")
 	var hosts []string
 	if u.Host != "" {
 		hosts, err = resolveLookup(u.Host)
@@ -64,19 +68,23 @@ func main() {
 		log.Fatal("ERROR: publish: ", err)
 	}
 
-	_, err = host.Init()
-	if err != nil {
-		log.Fatal(err)
+	var pca *pca9685.Dev
+
+	if !*uiOnly {
+		_, err = host.Init()
+		if err != nil {
+			log.Fatal(err)
+		}
+		bus, err := i2creg.Open("")
+		if err != nil {
+			log.Fatal(err)
+		}
+		pca, err = pca9685.NewI2C(bus, pca9685.I2CAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pca.SetPwmFreq(50*physic.Hertz - (physic.Hertz / 2))
 	}
-	bus, err := i2creg.Open("")
-	if err != nil {
-		log.Fatal(err)
-	}
-	pca, err := pca9685.NewI2C(bus, pca9685.I2CAddr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	pca.SetPwmFreq(50*physic.Hertz - (physic.Hertz / 2))
 
 	var cfg Config
 	yAxis := &servo{
@@ -109,6 +117,9 @@ func main() {
 	var pLoc pontoonLocation
 	const earthRadiusCM = 6371 * 1000 * 100
 	orientAntenna := func() {
+		if *uiOnly {
+			return
+		}
 		if cfg.Calibrate {
 			log.Println("Calibration mode.")
 			xAxis.Center()
@@ -190,6 +201,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	err = cli.Subscribe(path.Join(*pontoonTopicRoot, "location"), 1, func(_ mqtt.Client, msg mqtt.Message) {
 		mx.Lock()
 		defer mx.Unlock()
@@ -210,8 +222,72 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt)
-	<-ch
+	srv := &server{cfg: &cfg, mx: &mx}
+	http.HandleFunc("/", srv.serveIndex)
+	http.HandleFunc("/save", func(w http.ResponseWriter, req *http.Request) {
+		mx.Lock()
+		c := cfg
+		mx.Unlock()
+		var err error
+		setFloat := func(t *float64, name string) {
+			if err != nil {
+				return
+			}
+			var val float64
+			val, err = strconv.ParseFloat(req.FormValue(name), 64)
+			if err != nil {
+				err = fmt.Errorf("invalid value for '%s': %v", name, err)
+				return
+			}
+			*t = val
+		}
 
+		setFloat(&c.Antenna.Bearing, "bearing")
+		setFloat(&c.Antenna.Lat, "lat")
+		setFloat(&c.Antenna.Lng, "lng")
+		setFloat(&c.Antenna.HeightCM, "height")
+
+		setFloat(&c.ServoX.Offset, "xoffset")
+		setFloat(&c.ServoX.Min, "xmin")
+		setFloat(&c.ServoX.Max, "xmax")
+
+		setFloat(&c.ServoY.Offset, "yoffset")
+		setFloat(&c.ServoY.Min, "ymin")
+		setFloat(&c.ServoY.Max, "ymax")
+
+		c.Calibrate = req.FormValue("calibrate") == "1"
+		c.CenterWhenOffline = req.FormValue("centeroffline") == "1"
+
+		errRedir := func(err error) bool {
+			if err == nil {
+				return false
+			}
+			http.Redirect(w, req, "/?err="+url.QueryEscape(err.Error()), 302)
+			return true
+		}
+		if errRedir(err) {
+			return
+		}
+
+		data, err := json.MarshalIndent(c, "", "  ")
+		if errRedir(err) {
+			return
+		}
+
+		mx.Lock()
+		err = cli.Publish(path.Join(topic, "config"), 0, true, data)
+		if errRedir(err) {
+			return
+		}
+		cfg = c
+		mx.Unlock()
+
+		orientAntenna()
+		http.Redirect(w, req, "/", 302)
+	})
+
+	err = http.ListenAndServe(*httpAddr, nil)
+	if err != nil {
+		log.Fatal("ERROR: ", err)
+	}
 }
