@@ -149,12 +149,12 @@ func main() {
 		log.Println("X-Angle", newAngle)
 
 		dist := origin.Distance(dest).Abs().Radians() * earthRadiusCM
-		log.Println("dist:", dist)
+		log.Println("Distance:", dist)
 
 		h := math.Sqrt(math.Pow(dist, 2) + math.Pow(cfg.Antenna.HeightCM, 2))
 		yAdj := math.Asin(dist/h)*180/math.Pi - 90
 		yAxis.SetAngle(yAdj)
-		log.Println("angle:", yAdj)
+		log.Println("Y-Angle:", yAdj)
 	}
 
 	err = cli.Subscribe(path.Join(topic, "config"), 1, func(_ mqtt.Client, msg mqtt.Message) {
