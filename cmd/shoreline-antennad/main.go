@@ -160,6 +160,7 @@ func main() {
 	err = cli.Subscribe(path.Join(topic, "config"), 1, func(_ mqtt.Client, msg mqtt.Message) {
 		mx.Lock()
 		defer mx.Unlock()
+		msg.Ack()
 
 		var newCfg Config
 		err := json.Unmarshal(msg.Payload(), &newCfg)
@@ -179,6 +180,7 @@ func main() {
 	err = cli.Subscribe(path.Join(*pontoonTopicRoot, "online"), 0, func(_ mqtt.Client, msg mqtt.Message) {
 		mx.Lock()
 		defer mx.Unlock()
+		msg.Ack()
 
 		pOnline = string(msg.Payload()) == "true"
 
@@ -191,6 +193,7 @@ func main() {
 	err = cli.Subscribe(path.Join(*pontoonTopicRoot, "location"), 1, func(_ mqtt.Client, msg mqtt.Message) {
 		mx.Lock()
 		defer mx.Unlock()
+		msg.Ack()
 
 		var newPLoc pontoonLocation
 		err := json.Unmarshal(msg.Payload(), &newPLoc)
