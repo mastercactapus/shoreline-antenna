@@ -137,8 +137,16 @@ func main() {
 		dest := s2.PointFromLatLng(s2.LatLngFromDegrees(pLoc.Lat, pLoc.Lon))
 		origin := s2.PointFromLatLng(s2.LatLngFromDegrees(cfg.Antenna.Lat, cfg.Antenna.Lng))
 
-		ang := s2.Angle(northPole, origin, dest).Degrees() - cfg.Antenna.Bearing
-		xAxis.SetAngle(ang)
+		tAng := -s2.TurnAngle(southPole, origin, dest).Degrees()
+
+		b := cfg.Antenna.Bearing
+		if b >= 180 {
+			b -= 360
+		}
+
+		newAngle := tAng - b
+		xAxis.SetAngle(newAngle)
+		log.Println("X-Angle", newAngle)
 
 		dist := origin.Distance(dest).Abs().Radians() * earthRadiusCM
 		log.Println("dist:", dist)

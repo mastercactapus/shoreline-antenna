@@ -83,4 +83,5 @@ func calcAngle(heading, lat1, lon1, lat2, lon2 float64) float64 {
 	return a
 }
 
-var northPole = s2.PointFromLatLng(s2.LatLngFromDegrees(90, -135))
+var northPole = s2.PointFromLatLng(s2.LatLngFromDegrees(90, 0))
+var southPole = s2.PointFromLatLng(s2.LatLngFromDegrees(-90, 0))
