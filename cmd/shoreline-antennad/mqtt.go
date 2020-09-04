@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/hashicorp/mdns"
@@ -13,6 +14,18 @@ import (
 )
 
 func resolveMDNS(host string) ([]net.IP, error) {
+	t := time.NewTimer(5 * time.Second)
+	defer t.Stop()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+		case <-t.C:
+			log.Fatal("mdns lookup timed out after 5 seconds")
+		}
+	}()
+
 	mCast := &net.UDPAddr{
 		IP:   net.ParseIP("224.0.0.251"),
 		Port: 5353,
